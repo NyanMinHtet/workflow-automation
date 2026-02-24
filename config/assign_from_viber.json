@@ -1,0 +1,30 @@
+{
+  "open_stage_names": [
+    "New",
+    "TODAY - TO DO LIST",
+    "THIS WEEK - TO DO LIST"
+  ],
+  "todo_stage_names": [
+    "TODAY - TO DO LIST",
+    "THIS WEEK - TO DO LIST"
+  ],
+  "recent_days": 7,
+  "preferred_developers": {
+    "default": [
+      "Zin Mar Htwe",
+      "Arkar Maung Maung",
+      "Htet Htet Zin",
+      "Htet Aung WIN",
+      "Nyan Min Htet",
+      "Khant Thu Aung"
+    ]
+  },
+  "developer_roles": {
+    "Arkar Maung Maung": "senior odoo developer",
+    "Nyan Min Htet": "senior odoo developer",
+    "Zin Mar Htwe": "mid odoo developer",
+    "Htet Htet Zin": "mid odoo developer",
+    "Htet Aung WIN": "mid odoo developer",
+    "Khant Thu Aung": "senior odoo developer"
+  }
+}
