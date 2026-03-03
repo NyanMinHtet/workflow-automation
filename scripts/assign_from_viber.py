@@ -137,6 +137,29 @@ def html_to_text(value):
     return "\n".join(compact).strip()
 
 
+def resolve_stage_ids(models, db, uid, password, stage_names=None, fallback_domain=None):
+    stage_names = stage_names or []
+    if stage_names:
+        stage_ids = search_read(
+            models, db, uid, password,
+            "project.task.type",
+            [("name", "in", stage_names)],
+            ["id", "name"],
+        )
+        ids = [s["id"] for s in stage_ids]
+        if ids:
+            return ids
+    if fallback_domain:
+        stage_ids = search_read(
+            models, db, uid, password,
+            "project.task.type",
+            fallback_domain,
+            ["id", "name"],
+        )
+        return [s["id"] for s in stage_ids]
+    return []
+
+
 def main():
     locale_is_utf8 = configure_utf8_io()
     ap = argparse.ArgumentParser(description="Assign Odoo tasks from Viber messages")
@@ -179,6 +202,7 @@ def main():
         eprint("Warning: terminal locale is not UTF-8. Myanmar text may look broken. Try: export LANG=en_US.UTF-8")
 
     open_stage_names = cfg.get("open_stage_names", [])
+    in_progress_stage_names = cfg.get("in_progress_stage_names", ["In Progress", "IN PROGRESS"])
     preferred_map = cfg.get("preferred_developers", {})
     role_map = cfg.get("developer_roles", {})
     recent_days = int(cfg.get("recent_days", 7))
@@ -225,27 +249,14 @@ def main():
         print(details)
 
         # Resolve open stages
-        stage_id_list = []
-        if open_stage_names:
-            stage_ids = search_read(
-                models, db, uid, password,
-                "project.task.type",
-                [("name", "in", open_stage_names)],
-                ["id", "name"],
-            )
-            stage_id_list = [s["id"] for s in stage_ids]
+        stage_id_list = resolve_stage_ids(
+            models, db, uid, password,
+            stage_names=open_stage_names,
+            fallback_domain=[("fold", "=", False)],
+        )
         if not stage_id_list:
-            # Fallback: use non-folded stages as open
-            stage_ids = search_read(
-                models, db, uid, password,
-                "project.task.type",
-                [("fold", "=", False)],
-                ["id", "name", "fold"],
-            )
-            stage_id_list = [s["id"] for s in stage_ids]
-            if not stage_id_list:
-                print("No open stages found; skipping")
-                continue
+            print("No open stages found; skipping")
+            continue
 
         # Count open tasks per developer in project
         domain = [("project_id", "=", project_id), ("stage_id", "in", stage_id_list), ("user_id", "!=", False)]
@@ -289,6 +300,26 @@ def main():
             print("No candidates found")
             continue
 
+        in_progress_stage_ids = resolve_stage_ids(
+            models, db, uid, password,
+            stage_names=in_progress_stage_names,
+            fallback_domain=[("name", "ilike", "progress")],
+        )
+        in_progress_counts = {}
+        if in_progress_stage_ids:
+            in_progress_tasks = search_read(
+                models, db, uid, password,
+                "project.task",
+                [("stage_id", "in", in_progress_stage_ids), ("user_id", "in", candidate_ids)],
+                ["id", "user_id"],
+            )
+            for t in in_progress_tasks:
+                uid_pair = t.get("user_id")
+                if not uid_pair:
+                    continue
+                uid_val = uid_pair[0]
+                in_progress_counts[uid_val] = in_progress_counts.get(uid_val, 0) + 1
+
         # Build candidate info
         cand_records = read(models, db, uid, password, "res.users", candidate_ids, ["id", "name", "login", "email"]) 
         candidates = []
@@ -301,6 +332,7 @@ def main():
                 "email": u.get("email"),
                 "role": resolve_role(role_map, u),
                 "count": counts.get(uid_val, 0),
+                "in_progress": in_progress_counts.get(uid_val, 0),
                 "recent": recent.get(uid_val, False),
             })
 
@@ -310,9 +342,11 @@ def main():
         print("Candidates (most project tasks first):")
         for i, c in enumerate(candidates, 1):
             rec = " recent" if c["recent"] else ""
-            print(f"{i}. {c['name']} | {c['role']} | open tasks in project: {c['count']}{rec}")
+            print(f"{i}. {c['name']} | {c['role']} | open tasks in project: {c['count']} | in-progress: {c['in_progress']}{rec}")
 
         top = candidates[0]
+        if top["in_progress"] > 0:
+            print(f"Warning: {top['name']} already has {top['in_progress']} in-progress task(s).")
         yn = input(f"Assign to {top['name']}? [y/N] ").strip().lower()
         if yn != "y":
             sel = input("Enter candidate number to assign (or blank to skip): ").strip()

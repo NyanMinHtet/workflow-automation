@@ -8,6 +8,10 @@
     "TODAY - TO DO LIST",
     "THIS WEEK - TO DO LIST"
   ],
+  "in_progress_stage_names": [
+    "IN PROGRESS",
+    "In Progress"
+  ],
   "recent_days": 7,
   "preferred_developers": {
     "default": [
