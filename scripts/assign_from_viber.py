@@ -1,6 +1,8 @@
 #!/usr/bin/env python3
 import argparse
+import html
 import json
+import locale
 import os
 import re
 import sys
@@ -8,9 +10,20 @@ from datetime import datetime, timedelta, timezone
 import xmlrpc.client
 
 CODE_RE = re.compile(r"\bTSK-[A-Z0-9]+-\d+\b")
+TAG_RE = re.compile(r"<[^>]+>")
 
 def eprint(*args, **kwargs):
     print(*args, file=sys.stderr, **kwargs)
+
+
+def configure_utf8_io():
+    # Ensure terminal output can render non-ASCII text (e.g., Myanmar script).
+    preferred = locale.getpreferredencoding(False) or ""
+    if hasattr(sys.stdout, "reconfigure"):
+        sys.stdout.reconfigure(encoding="utf-8", errors="replace")
+    if hasattr(sys.stderr, "reconfigure"):
+        sys.stderr.reconfigure(encoding="utf-8", errors="replace")
+    return preferred.lower() == "utf-8"
 
 
 def load_config(path):
@@ -105,7 +118,27 @@ def resolve_role(role_map, user_rec):
     return "-"
 
 
+def html_to_text(value):
+    if not value:
+        return ""
+    text = value.replace("<br>", "\n").replace("<br/>", "\n").replace("<br />", "\n")
+    text = text.replace("</p>", "\n").replace("</li>", "\n")
+    text = TAG_RE.sub("", text)
+    text = html.unescape(text)
+    lines = [line.rstrip() for line in text.splitlines()]
+    compact = []
+    prev_blank = False
+    for line in lines:
+        is_blank = not line.strip()
+        if is_blank and prev_blank:
+            continue
+        compact.append(line)
+        prev_blank = is_blank
+    return "\n".join(compact).strip()
+
+
 def main():
+    locale_is_utf8 = configure_utf8_io()
     ap = argparse.ArgumentParser(description="Assign Odoo tasks from Viber messages")
     ap.add_argument("--config", default="config/assign_from_viber.json")
     ap.add_argument("--input", help="Path to text file containing Viber messages")
@@ -142,6 +175,8 @@ def main():
     me = read(models, db, uid, password, "res.users", [uid], ["name", "login"])
     if me:
         print(f"Login OK: {me[0].get('name')} ({me[0].get('login')})")
+    if not locale_is_utf8:
+        eprint("Warning: terminal locale is not UTF-8. Myanmar text may look broken. Try: export LANG=en_US.UTF-8")
 
     open_stage_names = cfg.get("open_stage_names", [])
     preferred_map = cfg.get("preferred_developers", {})
@@ -154,9 +189,8 @@ def main():
             models, db, uid, password,
             "project.task",
             [("code", "=", code)],
-            ["id", "name", "code", "project_id", "user_id", "priority", "stage_id", "write_date"],
+            ["id", "name", "code", "project_id", "user_id", "priority", "stage_id", "write_date", "description"],
         )
-        print("taskss",tasks)
         if not tasks:
             print("No task found")
             continue
@@ -183,6 +217,12 @@ def main():
         current_user = task.get("user_id")
         current_user_name = current_user[1] if current_user else "-"
         priority = task.get("priority", "0")
+        details = html_to_text(task.get("description")) or "(No description on task)"
+
+        print(f"Task: {task['name']}")
+        print(f"Project: {project_name} | Priority: {priority} | Current: {current_user_name}")
+        print("Ticket description:")
+        print(details)
 
         # Resolve open stages
         stage_id_list = []
@@ -267,8 +307,6 @@ def main():
         # Sort by most tasks in project
         candidates.sort(key=lambda x: (-x["count"], x["name"]))
 
-        print(f"Task: {task['name']}")
-        print(f"Project: {project_name} | Priority: {priority} | Current: {current_user_name}")
         print("Candidates (most project tasks first):")
         for i, c in enumerate(candidates, 1):
             rec = " recent" if c["recent"] else ""
