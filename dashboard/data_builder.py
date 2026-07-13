@@ -11,6 +11,38 @@ if str(REPO_ROOT / 'scripts') not in sys.path:
 import assign_from_viber
 
 
+def get_dashboard_ticket_codes(cfg, models, db, uid, password):
+    stage_names = cfg.get('open_stage_names', [])
+    stage_ids = assign_from_viber.resolve_stage_ids(
+        models,
+        db,
+        uid,
+        password,
+        stage_names=stage_names,
+        fallback_domain=[('fold', '=', False)],
+    )
+    if not stage_ids:
+        return []
+
+    tasks = assign_from_viber.search_read(
+        models,
+        db,
+        uid,
+        password,
+        'project.task',
+        [('stage_id', 'in', stage_ids)],
+        ['code'],
+        limit=10,
+        order='create_date desc',
+    )
+    codes = [task.get('code') for task in tasks if task.get('code')]
+    if codes:
+        return list(dict.fromkeys(codes))
+
+    configured_codes = cfg.get('dashboard_ticket_codes') or []
+    return [code for code in configured_codes if code]
+
+
 def load_dashboard_payload():
     config_path = REPO_ROOT / 'config' / 'assign_from_viber.json'
     cfg = assign_from_viber.load_config(str(config_path))
@@ -36,8 +68,9 @@ def load_dashboard_payload():
 
     tickets = []
     developers = []
+    ticket_codes = get_dashboard_ticket_codes(cfg, models, db, uid, password)
 
-    for code in ['TSK-BMKC-231', 'TSK-BMKC-237']:
+    for code in ticket_codes:
         tasks = assign_from_viber.search_read(
             models, db, uid, password,
             'project.task',

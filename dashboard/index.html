@@ -47,6 +47,7 @@
       .candidate { border: 1px solid rgba(255,255,255,.08); border-radius: 12px; padding: 10px; background: rgba(20,37,61,.6); }
       .muted { color: var(--muted); font-size: .9rem; }
       .button { background: var(--accent); color: white; border: none; border-radius: 10px; padding: 8px 12px; font-weight: 600; cursor: pointer; }
+      .button.secondary { background: rgba(255,255,255,.08); color: var(--text); }
       @media (max-width: 900px) { .grid { grid-template-columns: 1fr; } }
     </style>
   </head>
@@ -57,7 +58,10 @@
           <h1>Assignment Dashboard</h1>
           <div class="muted">Touch-friendly view for smart task assignment</div>
         </div>
-        <div class="badge" id="status">Loading…</div>
+        <div style="display:flex; align-items:center; gap:8px;">
+          <button class="button secondary" id="refreshBtn" type="button">Refresh</button>
+          <div class="badge" id="status">Loading…</div>
+        </div>
       </div>
 
       <div class="grid">
@@ -81,9 +85,11 @@
 
     <script>
       async function loadData() {
+        const statusEl = document.getElementById('status');
+        statusEl.textContent = 'Refreshing…';
         const res = await fetch('/api/dashboard');
         const data = await res.json();
-        document.getElementById('status').textContent = data.status;
+        statusEl.textContent = data.status;
         document.getElementById('ticketCount').textContent = `${data.tickets.length} tickets`;
         document.getElementById('developerCount').textContent = `${data.developers.length} devs`;
 
@@ -119,6 +125,7 @@
           devsEl.appendChild(item);
         });
       }
+      document.getElementById('refreshBtn').addEventListener('click', loadData);
       loadData();
     </script>
   </body>

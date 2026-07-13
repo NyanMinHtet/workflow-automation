@@ -13,6 +13,10 @@
     "In Progress"
   ],
   "recent_days": 7,
+  "dashboard_ticket_codes": [
+    "TSK-BMKC-231",
+    "TSK-BMKC-237"
+  ],
   "preferred_developers": {
     "default": [
       "Zin Mar Htwe",

@@ -5,10 +5,15 @@ from unittest.mock import patch
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
 MODULE_PATH = REPO_ROOT / "scripts" / "assign_from_viber.py"
+DASHBOARD_MODULE_PATH = REPO_ROOT / "dashboard" / "data_builder.py"
 
 spec = importlib.util.spec_from_file_location("assign_from_viber", MODULE_PATH)
 assign_from_viber = importlib.util.module_from_spec(spec)
 spec.loader.exec_module(assign_from_viber)
+
+spec = importlib.util.spec_from_file_location("dashboard_data_builder", DASHBOARD_MODULE_PATH)
+dashboard_data_builder = importlib.util.module_from_spec(spec)
+spec.loader.exec_module(dashboard_data_builder)
 
 
 class SmartAssignTests(unittest.TestCase):
@@ -160,6 +165,24 @@ class SmartAssignTests(unittest.TestCase):
 
         with patch.object(assign_from_viber.xmlrpc.client, "ServerProxy", side_effect=fake_server_proxy):
             assign_from_viber.xmlrpc_login("https://odoo.local", "db", "user", "pw")
+
+    def test_dashboard_ticket_codes_are_loaded_live_from_odoo(self):
+        class DummyModels:
+            def execute_kw(self, db, uid, password, model, method, args, kwargs):
+                if model == "project.task" and method == "search_read":
+                    return [{"code": "TSK-LIVE-001"}]
+                return []
+
+        with patch.object(dashboard_data_builder.assign_from_viber, "resolve_stage_ids", return_value=[7, 8]):
+            codes = dashboard_data_builder.get_dashboard_ticket_codes(
+                {"open_stage_names": ["New"], "dashboard_ticket_codes": ["TSK-STATIC-001"]},
+                DummyModels(),
+                "db",
+                1,
+                "pw",
+            )
+
+        self.assertEqual(codes, ["TSK-LIVE-001"])
 
 
 if __name__ == "__main__":
