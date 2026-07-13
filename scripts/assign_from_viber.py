@@ -5,8 +5,11 @@ import json
 import locale
 import os
 import re
+import ssl
 import sys
+from collections import defaultdict
 from datetime import datetime, timedelta, timezone
+import http.client
 import xmlrpc.client
 
 CODE_RE = re.compile(r"\bTSK-[A-Z0-9]+-\d+\b")
@@ -57,12 +60,34 @@ def extract_codes(text):
     return sorted(set(CODE_RE.findall(text)))
 
 
+class _SslTransport(xmlrpc.client.Transport):
+    def __init__(self, context=None, use_datetime=False, use_builtin_types=False):
+        super().__init__(use_datetime=use_datetime, use_builtin_types=use_builtin_types)
+        self._context = context
+        self.timeout = None
+
+    def make_connection(self, host):
+        if self._context is not None:
+            return http.client.HTTPSConnection(host, timeout=self.timeout, context=self._context)
+        return super().make_connection(host)
+
+
+def _build_xmlrpc_server_proxy(url):
+    if url.startswith("https://"):
+        context = ssl.create_default_context()
+        context.check_hostname = False
+        context.verify_mode = ssl.CERT_NONE
+        transport = _SslTransport(context=context)
+        return xmlrpc.client.ServerProxy(url, transport=transport)
+    return xmlrpc.client.ServerProxy(url)
+
+
 def xmlrpc_login(url, db, user, password):
-    common = xmlrpc.client.ServerProxy(f"{url}/xmlrpc/2/common")
+    common = _build_xmlrpc_server_proxy(f"{url}/xmlrpc/2/common")
     uid = common.authenticate(db, user, password, {})
     if not uid:
         raise RuntimeError("Authentication failed")
-    models = xmlrpc.client.ServerProxy(f"{url}/xmlrpc/2/object")
+    models = _build_xmlrpc_server_proxy(f"{url}/xmlrpc/2/object")
     return uid, models
 
 
@@ -86,12 +111,27 @@ def write(models, db, uid, password, model, ids, values):
 def resolve_users(models, db, uid, password, identifiers):
     resolved = {}
     for ident in identifiers:
-        dom = ["|", "|", ("login", "=", ident), ("email", "=", ident), ("name", "=", ident)]
-        users = search_read(models, db, uid, password, "res.users", dom, ["id", "name", "login", "email"], limit=1)
+        exact_dom = ["|", "|", ("login", "=", ident), ("email", "=", ident), ("name", "=", ident)]
+        users = search_read(models, db, uid, password, "res.users", exact_dom, ["id", "name", "login", "email"], limit=1)
         if users:
             resolved[ident] = users[0]
-        else:
-            resolved[ident] = None
+            continue
+
+        normalized_ident = re.sub(r"\s+", " ", (ident or "")).strip().lower()
+        fallback_dom = ["|", "|", ("login", "ilike", ident), ("email", "ilike", ident), ("name", "ilike", ident)]
+        fallback_users = search_read(models, db, uid, password, "res.users", fallback_dom, ["id", "name", "login", "email"], limit=5)
+        matched = None
+        if fallback_users:
+            for user in fallback_users:
+                candidate_name = re.sub(r"\s+", " ", (user.get("name") or "")).strip().lower()
+                candidate_login = re.sub(r"\s+", " ", (user.get("login") or "")).strip().lower()
+                candidate_email = re.sub(r"\s+", " ", (user.get("email") or "")).strip().lower()
+                if candidate_name == normalized_ident or candidate_login == normalized_ident or candidate_email == normalized_ident:
+                    matched = user
+                    break
+            if not matched:
+                matched = fallback_users[0]
+        resolved[ident] = matched
     return resolved
 
 
@@ -112,10 +152,90 @@ def resolve_role(role_map, user_rec):
     name = user_rec.get("name")
     login = user_rec.get("login")
     email = user_rec.get("email")
-    for key in (name, login, email):
-        if key and key in role_map:
+    candidates = [name, login, email]
+    normalized = {}
+    for key in candidates:
+        if not key:
+            continue
+        normalized[re.sub(r"\s+", " ", str(key)).strip().lower()] = key
+    for key in normalized:
+        if key in role_map:
+            return role_map[key]
+    for key in role_map:
+        normalized_key = re.sub(r"\s+", " ", str(key)).strip().lower()
+        if normalized_key in normalized:
             return role_map[key]
     return "-"
+
+
+def normalize_text(value):
+    return (value or "").strip().lower()
+
+
+def extract_skill_matches(text, developer_skills, skill_keywords):
+    if not text:
+        return []
+    normalized = normalize_text(text)
+    matched = []
+    for developer, skills in (developer_skills or {}).items():
+        for skill in skills or []:
+            keywords = skill_keywords.get(skill, []) or []
+            if any(keyword and keyword.lower() in normalized for keyword in keywords):
+                matched.append((developer, skill))
+                break
+    return matched
+
+
+def score_candidate(candidate, task_text, priority, open_task_count, in_progress_count, assignment_history, weights, developer_skills=None, skill_keywords=None):
+    role = normalize_text(candidate.get("role"))
+    developer_name = candidate.get("name")
+    score = 0.0
+    reasons = []
+
+    developer_skills = developer_skills or {}
+    skill_keywords = skill_keywords or {}
+
+    skills = developer_skills.get(developer_name, []) or []
+    matched_skills = []
+    if task_text:
+        normalized = normalize_text(task_text)
+        for skill in skills:
+            keywords = skill_keywords.get(skill, []) or []
+            if any(keyword and keyword.lower() in normalized for keyword in keywords):
+                matched_skills.append(skill)
+    if matched_skills:
+        score += weights.get("skill_match", 0) * len(matched_skills)
+        reasons.append(f"skill match: {', '.join(matched_skills)}")
+
+    if role and "senior" in role:
+        priority_value = int(str(priority or "0").strip() or "0")
+        if priority_value >= 3:
+            score += weights.get("urgency", 0) * 2
+            reasons.append("senior fit for high priority")
+
+    if open_task_count is not None:
+        score += weights.get("workload", 0) * max(0, 1 - open_task_count)
+        reasons.append(f"workload bonus: {open_task_count} open")
+
+    if in_progress_count and in_progress_count > 1:
+        score -= weights.get("in_progress_penalty", 0) * (in_progress_count - 1)
+        reasons.append(f"in-progress penalty: {in_progress_count}")
+
+    history_count = assignment_history.get(developer_name, 0)
+    if history_count:
+        score += weights.get("fairness", 0) * max(0, 2 - history_count)
+        reasons.append(f"fairness bonus: recent assignments {history_count}")
+
+    return {
+        "id": candidate.get("id"),
+        "name": developer_name,
+        "role": candidate.get("role"),
+        "count": candidate.get("count", 0),
+        "in_progress": candidate.get("in_progress", 0),
+        "recent": candidate.get("recent", False),
+        "score": round(score, 2),
+        "reasons": reasons,
+    }
 
 
 def html_to_text(value):
@@ -296,6 +416,8 @@ def main():
 
         # Candidate list
         candidate_ids = preferred_ids if preferred_ids else list(counts.keys())
+        if preferred_ids:
+            candidate_ids = list(dict.fromkeys(preferred_ids + list(counts.keys())))
         if not candidate_ids:
             print("No candidates found")
             continue
@@ -336,17 +458,48 @@ def main():
                 "recent": recent.get(uid_val, False),
             })
 
-        # Sort by most tasks in project
-        candidates.sort(key=lambda x: (-x["count"], x["name"]))
+        developer_skills = cfg.get("developer_skills", {})
+        skill_keywords = cfg.get("skill_keywords", {})
+        scoring_weights = cfg.get("scoring_weights", {
+            "skill_match": 3.0,
+            "workload": 1.0,
+            "fairness": 0.8,
+            "urgency": 1.0,
+            "in_progress_penalty": 1.0,
+        })
+        assignment_history = defaultdict(int)
+        history_path = os.path.join(os.path.dirname(args.config), "assign_history.json")
+        if os.path.exists(history_path):
+            with open(history_path, "r", encoding="utf-8") as f:
+                history_data = json.load(f)
+                if isinstance(history_data, dict):
+                    assignment_history = defaultdict(int, history_data)
 
-        print("Candidates (most project tasks first):")
-        for i, c in enumerate(candidates, 1):
-            rec = " recent" if c["recent"] else ""
-            print(f"{i}. {c['name']} | {c['role']} | open tasks in project: {c['count']} | in-progress: {c['in_progress']}{rec}")
+        scored_candidates = []
+        for candidate in candidates:
+            scored = score_candidate(
+                candidate,
+                details,
+                priority,
+                candidate["count"],
+                candidate["in_progress"],
+                assignment_history,
+                scoring_weights,
+                developer_skills=developer_skills,
+                skill_keywords=skill_keywords,
+            )
+            scored_candidates.append(scored)
 
-        top = candidates[0]
-        if top["in_progress"] > 0:
-            print(f"Warning: {top['name']} already has {top['in_progress']} in-progress task(s).")
+        scored_candidates.sort(key=lambda x: (-x["score"], x["name"]))
+
+        print("Candidates (smart ranking):")
+        for i, c in enumerate(scored_candidates, 1):
+            rec = " recent" if any("recent" in reason.lower() for reason in c["reasons"]) else ""
+            print(f"{i}. {c['name']} | {c['role']} | score: {c['score']} | reasons: {', '.join(c['reasons'])}{rec}")
+
+        top = scored_candidates[0]
+        if top.get("in_progress", 0) > 0:
+            print(f"Warning: {top['name']} already has {top.get('in_progress', 0)} in-progress task(s).")
         yn = input(f"Assign to {top['name']}? [y/N] ").strip().lower()
         if yn != "y":
             sel = input("Enter candidate number to assign (or blank to skip): ").strip()
@@ -354,7 +507,8 @@ def main():
                 print("Skipped")
                 continue
             try:
-                top = candidates[int(sel) - 1]
+                selected = scored_candidates[int(sel) - 1]
+                top = selected
             except Exception:
                 print("Invalid selection, skipped")
                 continue
@@ -365,6 +519,9 @@ def main():
 
         ok = write(models, db, uid, password, "project.task", [task["id"]], {"user_id": top["id"]})
         if ok:
+            assignment_history[top["name"]] = assignment_history.get(top["name"], 0) + 1
+            with open(history_path, "w", encoding="utf-8") as f:
+                json.dump(dict(assignment_history), f, indent=2)
             print(f"Assigned to {top['name']}")
         else:
             print("Assign failed")

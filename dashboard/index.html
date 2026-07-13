@@ -1,0 +1,125 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1" />
+    <title>Assignment Dashboard</title>
+    <style>
+      :root {
+        color-scheme: dark;
+        --bg: #07111f;
+        --panel: #0f1b2d;
+        --panel-2: #14253d;
+        --text: #f4f6fa;
+        --muted: #8da0bc;
+        --accent: #42a5f5;
+        --accent-2: #26a69a;
+        --warn: #ffb300;
+        --danger: #ef5350;
+      }
+      * { box-sizing: border-box; }
+      body {
+        margin: 0;
+        font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+        background: linear-gradient(135deg, var(--bg), #12253b);
+        color: var(--text);
+        padding: 16px;
+      }
+      .app { max-width: 1200px; margin: 0 auto; }
+      .header {
+        display: flex; justify-content: space-between; align-items: center; gap: 12px;
+        margin-bottom: 16px;
+      }
+      .header h1 { margin: 0; font-size: 1.3rem; }
+      .badge { background: rgba(66,165,245,.2); color: var(--accent); padding: 6px 10px; border-radius: 999px; font-size: .9rem; }
+      .grid { display: grid; gap: 14px; grid-template-columns: 1.2fr .8fr; }
+      .card { background: rgba(15,27,45,.95); border: 1px solid rgba(255,255,255,.08); border-radius: 16px; padding: 14px; box-shadow: 0 10px 30px rgba(0,0,0,.2); }
+      .row { display: flex; justify-content: space-between; gap: 10px; align-items: center; }
+      .pill { display: inline-block; padding: 4px 8px; border-radius: 999px; font-size: .8rem; background: rgba(255,255,255,.08); color: var(--muted); }
+      .chip { display: inline-block; border-radius: 999px; padding: 4px 8px; font-size: .76rem; margin-right: 6px; margin-top: 6px; }
+      .chip.blue { background: rgba(66,165,245,.2); color: var(--accent); }
+      .chip.green { background: rgba(38,166,154,.2); color: var(--accent-2); }
+      .chip.warn { background: rgba(255,179,0,.2); color: var(--warn); }
+      .ticket-list { display: grid; gap: 10px; }
+      .ticket-item { border: 1px solid rgba(255,255,255,.08); border-radius: 12px; padding: 10px; background: rgba(20,37,61,.6); }
+      .ticket-item strong { display: block; margin-bottom: 4px; }
+      .candidate-list { display: grid; gap: 8px; }
+      .candidate { border: 1px solid rgba(255,255,255,.08); border-radius: 12px; padding: 10px; background: rgba(20,37,61,.6); }
+      .muted { color: var(--muted); font-size: .9rem; }
+      .button { background: var(--accent); color: white; border: none; border-radius: 10px; padding: 8px 12px; font-weight: 600; cursor: pointer; }
+      @media (max-width: 900px) { .grid { grid-template-columns: 1fr; } }
+    </style>
+  </head>
+  <body>
+    <div class="app">
+      <div class="header">
+        <div>
+          <h1>Assignment Dashboard</h1>
+          <div class="muted">Touch-friendly view for smart task assignment</div>
+        </div>
+        <div class="badge" id="status">Loading…</div>
+      </div>
+
+      <div class="grid">
+        <div class="card">
+          <div class="row">
+            <h3 style="margin:0">Pending tickets</h3>
+            <div class="pill" id="ticketCount">0</div>
+          </div>
+          <div class="ticket-list" id="tickets"></div>
+        </div>
+
+        <div class="card">
+          <div class="row">
+            <h3 style="margin:0">Developer overview</h3>
+            <div class="pill" id="developerCount">0</div>
+          </div>
+          <div class="candidate-list" id="developers"></div>
+        </div>
+      </div>
+    </div>
+
+    <script>
+      async function loadData() {
+        const res = await fetch('/api/dashboard');
+        const data = await res.json();
+        document.getElementById('status').textContent = data.status;
+        document.getElementById('ticketCount').textContent = `${data.tickets.length} tickets`;
+        document.getElementById('developerCount').textContent = `${data.developers.length} devs`;
+
+        const ticketsEl = document.getElementById('tickets');
+        ticketsEl.innerHTML = '';
+        data.tickets.forEach(ticket => {
+          const item = document.createElement('div');
+          item.className = 'ticket-item';
+          item.innerHTML = `
+            <strong>${ticket.code} — ${ticket.title}</strong>
+            <div class="muted">${ticket.project} • Priority ${ticket.priority}</div>
+            <div style="margin-top:8px">
+              <span class="chip blue">Top: ${ticket.top_recommendation}</span>
+              <span class="chip green">Score: ${ticket.top_score}</span>
+              ${ticket.is_urgent ? '<span class="chip warn">Urgent</span>' : ''}
+            </div>
+          `;
+          ticketsEl.appendChild(item);
+        });
+
+        const devsEl = document.getElementById('developers');
+        devsEl.innerHTML = '';
+        data.developers.forEach(dev => {
+          const item = document.createElement('div');
+          item.className = 'candidate';
+          item.innerHTML = `
+            <div class="row">
+              <strong>${dev.name}</strong>
+              <span class="pill">${dev.role}</span>
+            </div>
+            <div class="muted">Open: ${dev.open_tasks} • In progress: ${dev.in_progress_tasks} • Recent: ${dev.recent_assignments}</div>
+          `;
+          devsEl.appendChild(item);
+        });
+      }
+      loadData();
+    </script>
+  </body>
+</html>

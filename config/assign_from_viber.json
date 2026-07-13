@@ -20,7 +20,8 @@
       "Htet Htet Zin",
       "Htet Aung WIN",
       "Nyan Min Htet",
-      "Htet Thiri Phyo"
+      "Htet Thiri Phyo",
+      "Yin Kyae Wai"
     ]
   },
   "developer_roles": {
@@ -29,6 +30,31 @@
     "Zin Mar Htwe": "mid odoo developer",
     "Htet Htet Zin": "mid odoo developer",
     "Htet Aung WIN": "mid odoo developer",
-    "Htet Thiri Phyo": "mid odoo developer"
+    "Htet Thiri Phyo": "mid odoo developer",
+    "Yin Kyae Wai": "intern odoo developer"
+  },
+  "developer_skills": {
+    "Arkar Maung Maung": ["odoo", "workflow", "reporting", "api"],
+    "Nyan Min Htet": ["odoo", "workflow", "reporting", "wizard"],
+    "Zin Mar Htwe": ["odoo", "reporting", "xml"],
+    "Htet Htet Zin": ["odoo", "workflow"],
+    "Htet Aung WIN": ["odoo", "api"],
+    "Htet Thiri Phyo": ["odoo", "reporting"],
+    "Yin Kyae Wai": ["odoo", "workflow"]
+  },
+  "skill_keywords": {
+    "odoo": ["odoo", "module", "record", "view"],
+    "workflow": ["workflow", "approval", "stage", "transition"],
+    "reporting": ["report", "excel", "xlsx", "pivot", "csv"],
+    "api": ["api", "integration", "xmlrpc", "webhook"],
+    "wizard": ["wizard", "popup", "dialog"],
+    "xml": ["xml", "qweb", "view"]
+  },
+  "scoring_weights": {
+    "skill_match": 3.0,
+    "workload": 1.0,
+    "fairness": 0.8,
+    "urgency": 1.0,
+    "in_progress_penalty": 1.0
   }
 }
